@@ -261,10 +261,10 @@ class ExternalBrowser:
             "--hide-crash-restore-bubble",
             "--autoplay-policy=no-user-gesture-required",
             "--disable-features=Translate,MediaRouter",
-            # The browser's own permission bubbles ("... wants to show notifications", location,
-            # ...) are drawn by the browser, not the page: in the small window nothing can click
-            # them and the control view cannot show them. Answer them all with "block".
-            "--deny-permission-prompts",
+            # The browser's own "... wants to show notifications" bubble is drawn by the browser,
+            # not the page: in the small window nothing can click it and the control view cannot
+            # show it. Turning the notification feature off means sites never ask.
+            # (Not --deny-permission-prompts: that also refuses protected content, i.e. DRM.)
             "--disable-notifications",
         ]
         try:
