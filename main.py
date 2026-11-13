@@ -205,6 +205,11 @@ class ExternalBrowser:
             "--hide-crash-restore-bubble",
             "--autoplay-policy=no-user-gesture-required",
             "--disable-features=Translate,MediaRouter",
+            # The browser's own permission bubbles ("... wants to show notifications", location,
+            # ...) are drawn by the browser, not the page: in the small window nothing can click
+            # them and the control view cannot show them. Answer them all with "block".
+            "--deny-permission-prompts",
+            "--disable-notifications",
         ]
         try:
             self.browser = await asyncio.create_subprocess_exec(
