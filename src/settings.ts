@@ -12,8 +12,44 @@ export interface Bookmark {
   engine: EngineChoice;
 }
 
+export type Tab = "phone" | "watch" | "window" | "help";
+
+/** Phone mirroring. Everything except `autoOpen` is also sent to the backend (see mirror.ts). */
+export interface MirrorSettings {
+  /** The Deck shows up on phones as an AirPlay screen. */
+  receiverOn: boolean;
+  /** The name phones see. */
+  name: string;
+  /** Anyone on the Wi-Fi, or only phones that typed the PIN once. */
+  access: "anyone" | "pin";
+  quality: "sharp" | "balanced" | "saver";
+  fps60: boolean;
+  lowDelay: boolean;
+  /** Crop the phone picture to fill a window of the chosen shape instead of taking the phone's shape. */
+  fill: boolean;
+  /** Volume of the phone's sound only, 0-100. */
+  volume: number;
+  /** Open the window when the phone starts mirroring and close it when it stops. */
+  autoOpen: boolean;
+}
+
+export const DEFAULT_MIRROR: MirrorSettings = {
+  receiverOn: true,
+  name: "Steam Deck",
+  access: "anyone",
+  quality: "balanced",
+  fps60: false,
+  lowDelay: false,
+  fill: false,
+  volume: 100,
+  autoOpen: true,
+};
+
 export interface Settings {
   version: 1;
+  /** Which page of the Quick Access panel was open last. */
+  tab: Tab;
+  mirror: MirrorSettings;
   /** PiP width as a fraction of the screen width. */
   size: number;
   aspect: Aspect;
@@ -39,6 +75,8 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   version: 1,
+  tab: "phone",
+  mirror: DEFAULT_MIRROR,
   size: 0.34,
   aspect: "16:9",
   posX: 1,
@@ -67,7 +105,14 @@ let loaded = false;
 export async function initSettings() {
   try {
     const stored = await loadSettings();
-    if (stored) settings.set({ ...DEFAULT_SETTINGS, ...stored, version: 1 });
+    if (stored) {
+      settings.set({
+        ...DEFAULT_SETTINGS,
+        ...stored,
+        mirror: { ...DEFAULT_MIRROR, ...(stored.mirror ?? {}) },
+        version: 1,
+      });
+    }
   } catch (e) {
     console.error("[PiP Theater] failed to load settings", e);
   }
@@ -77,6 +122,10 @@ export async function initSettings() {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => saveSettings(settings.get()).catch(console.error), 600);
   });
+}
+
+export function setMirror(patch: Partial<MirrorSettings>) {
+  settings.set((prev) => ({ mirror: { ...prev.mirror, ...patch } }));
 }
 
 export function newId(): string {

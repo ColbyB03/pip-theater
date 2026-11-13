@@ -3,7 +3,6 @@ import {
   DialogButton,
   DropdownItem,
   Field,
-  Focusable,
   Navigation,
   PanelSection,
   PanelSectionRow,
@@ -11,7 +10,7 @@ import {
   TextField,
   ToggleField,
 } from "@decky/ui";
-import { CSSProperties, ReactNode, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   FaBackward,
   FaEye,
@@ -25,33 +24,16 @@ import {
   FaVolumeMute,
   FaVolumeUp,
 } from "react-icons/fa";
+import { mirror, setWindow } from "./mirror";
+import { HelpTab, PhoneTab } from "./phonePanel";
 import * as player from "./player";
 import { runtime } from "./player";
-import { Aspect, MenuBehavior, newId, settings } from "./settings";
+import { Aspect, MenuBehavior, newId, settings, Tab } from "./settings";
 import { EngineChoice, needsDrm, normalizeUrl, PRESET_SITES, resolveEngine, siteName } from "./sites";
 import { useStore } from "./store";
+import { ButtonRow, Note, selectedBtn, smallBtn } from "./ui";
 
 export const BROWSE_ROUTE = "/pip-theater/browse";
-
-const smallBtn: CSSProperties = {
-  minWidth: 0,
-  flex: 1,
-  padding: "8px 4px",
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  gap: 6,
-};
-
-function ButtonRow({ children }: { children: ReactNode }) {
-  return (
-    <PanelSectionRow>
-      <Focusable style={{ display: "flex", gap: 6, padding: "4px 0" }} flow-children="horizontal">
-        {children}
-      </Focusable>
-    </PanelSectionRow>
-  );
-}
 
 const ENGINE_OPTIONS: { data: EngineChoice; label: string }[] = [
   { data: "auto", label: "Auto (recommended)" },
@@ -290,7 +272,7 @@ function Layout() {
         {SIZE_PRESETS.map((p) => (
           <DialogButton
             key={p.label}
-            style={{ ...smallBtn, fontWeight: Math.abs(s.size - p.size) < 0.01 ? 700 : 400 }}
+            style={{ ...smallBtn, ...(Math.abs(s.size - p.size) < 0.01 ? selectedBtn : {}) }}
             onClick={() => settings.set({ size: p.size })}
           >
             {p.label}
@@ -312,6 +294,7 @@ function Layout() {
       <PanelSectionRow>
         <DropdownItem
           label="Shape"
+          description="For streaming, and for the phone when Fill the window is on. Otherwise the phone window takes the phone's shape."
           selectedOption={s.aspect}
           rgOptions={(["16:9", "21:9", "4:3", "1:1"] as Aspect[]).map((a) => ({ data: a, label: a }))}
           onChange={(o) => settings.set({ aspect: o.data })}
@@ -325,10 +308,7 @@ function Layout() {
           {row.map((cell) => (
             <DialogButton
               key={cell.label}
-              style={{
-                ...smallBtn,
-                fontWeight: s.posX === cell.x && s.posY === cell.y ? 700 : 400,
-              }}
+              style={{ ...smallBtn, ...(s.posX === cell.x && s.posY === cell.y ? selectedBtn : {}) }}
               onClick={() => settings.set({ posX: cell.x, posY: cell.y })}
             >
               {cell.label}
@@ -456,13 +436,63 @@ function Advanced() {
   );
 }
 
+const TABS: { id: Tab; label: string }[] = [
+  { id: "phone", label: "Phone" },
+  { id: "watch", label: "Streaming" },
+  { id: "window", label: "Window" },
+  { id: "help", label: "Help" },
+];
+
+/** Shown on the Window page when there is nothing on screen to see the changes on. */
+function Preview() {
+  const rt = useStore(runtime);
+  const m = useStore(mirror);
+  if (rt.active || m.window) return null;
+  return (
+    <PanelSection>
+      <Note>Nothing is showing right now. Turn the phone window on to see your changes as you make them.</Note>
+      <PanelSectionRow>
+        <ButtonItem layout="below" onClick={() => setWindow(true)}>
+          Show the phone window
+        </ButtonItem>
+      </PanelSectionRow>
+    </PanelSection>
+  );
+}
+
 export function QuickAccessPanel() {
+  const s = useStore(settings);
+  const tab: Tab = TABS.some((t) => t.id === s.tab) ? s.tab : "phone";
   return (
     <>
-      <NowPlaying />
-      <Watch />
-      <Layout />
-      <Advanced />
+      <PanelSection>
+        <ButtonRow>
+          {TABS.map((t) => (
+            <DialogButton
+              key={t.id}
+              style={{ ...smallBtn, fontSize: 12, ...(t.id === tab ? selectedBtn : {}) }}
+              onClick={() => settings.set({ tab: t.id })}
+            >
+              {t.label}
+            </DialogButton>
+          ))}
+        </ButtonRow>
+      </PanelSection>
+      {tab === "phone" && <PhoneTab />}
+      {tab === "watch" && (
+        <>
+          <NowPlaying />
+          <Watch />
+          <Advanced />
+        </>
+      )}
+      {tab === "window" && (
+        <>
+          <Preview />
+          <Layout />
+        </>
+      )}
+      {tab === "help" && <HelpTab />}
     </>
   );
 }

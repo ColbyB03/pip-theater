@@ -15,6 +15,8 @@ export class Store<T extends object> {
 
   set = (patch: Partial<T> | ((prev: T) => Partial<T>)) => {
     const p = typeof patch === "function" ? patch(this.value) : patch;
+    const cur = this.value as Record<string, unknown>;
+    if (Object.keys(p).every((k) => Object.is(cur[k], (p as Record<string, unknown>)[k]))) return;
     this.value = { ...this.value, ...p };
     this.listeners.forEach((l) => l());
   };

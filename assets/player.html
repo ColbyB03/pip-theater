@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PiP Theater mirror</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden;
+    font-family: "Motiva Sans", Arial, sans-serif; color: #c7d5e0; }
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  #idle { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; gap: 6px; text-align: center; padding: 10px; background: #0b0f14; }
+  #idle .t { font-size: 14px; font-weight: bold; }
+  #idle .s { font-size: 12px; opacity: .8; line-height: 1.35; }
+  #idle .p { font-size: 15px; font-weight: bold; color: #fff; }
+  #shield { position: fixed; inset: 0; background: transparent; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="idle">
+  <div class="t" id="it">Waiting for your phone</div>
+  <div class="s" id="is"></div>
+  <div class="p" id="pin"></div>
+</div>
+<div id="shield"></div>
+<script>
+(function () {
+  'use strict';
+  var HEADER = 21;   // [4 length][1 flags][8 time, us][8 arrival, ms] then the Annex B frame
+  var S = new URLSearchParams(location.search).get('s') || '';
+  function url(p) { return p + (p.indexOf('?') < 0 ? '?' : '&') + 's=' + encodeURIComponent(S); }
+
+  var canvas = document.getElementById('c'), ctx = canvas.getContext('2d');
+  var idle = document.getElementById('idle');
+  var decoder = null, codec = '', needKey = true;
+  var decoded = 0, dropped = 0, restarts = 0, lastErr = '', support = '?';
+  var fw = 0, fh = 0, fpsCount = 0, havePicture = false;
+  var fill = false, pin = '', deckName = '', lastFrame = null;
+  var arrivals = new Map(), delays = [];
+  var streamAbort = null, lastRestart = 0, pictureLost = false;
+
+  function howTo() {
+    return 'On the phone: Control Center, Screen Mirroring, then pick ' + (deckName || 'the Deck') + '.';
+  }
+  function say(title, sub) {
+    document.getElementById('it').textContent = title;
+    document.getElementById('is').textContent = sub || '';
+    idle.style.display = 'flex';
+  }
+
+  // ---- can this browser decode H.264 at all? (shown in "Check setup")
+  if (!('VideoDecoder' in window)) {
+    support = 'no-webcodecs';
+  } else {
+    VideoDecoder.isConfigSupported({ codec: 'avc1.640028' }).then(function (r) {
+      support = r.supported ? 'yes' : 'no-h264';
+    }).catch(function () { support = 'unknown'; });
+  }
+
+  // avc1.PPCCLL from the stream's SPS (profile, constraints, level)
+  function codecFrom(annexb) {
+    for (var i = 0; i + 7 < annexb.length && i < 256; i++) {
+      if (annexb[i] === 0 && annexb[i + 1] === 0 && annexb[i + 2] === 1 && (annexb[i + 3] & 0x1f) === 7) {
+        var hex = function (b) { return ('0' + b.toString(16)).slice(-2); };
+        return 'avc1.' + hex(annexb[i + 4]) + hex(annexb[i + 5]) + hex(annexb[i + 6]);
+      }
+    }
+    return '';
+  }
+
+  function draw(frame) {
+    var dpr = window.devicePixelRatio || 1;
+    var cw = Math.max(1, Math.round(window.innerWidth * dpr)), ch = Math.max(1, Math.round(window.innerHeight * dpr));
+    if (canvas.width !== cw || canvas.height !== ch) { canvas.width = cw; canvas.height = ch; }
+    fw = frame.displayWidth; fh = frame.displayHeight;
+    // fit: the whole phone screen inside the window; fill: crop so the window is all picture
+    var sc = (fill ? Math.max : Math.min)(cw / fw, ch / fh), w = fw * sc, h = fh * sc;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, cw, ch);
+    ctx.drawImage(frame, (cw - w) / 2, (ch - h) / 2, w, h);
+  }
+
+  function redraw() { if (lastFrame && havePicture) { try { draw(lastFrame); } catch (e) {} } }
+  window.addEventListener('resize', redraw);
+
+  function onOutput(frame) {
+    decoded++;
+    var now = Date.now(), a = arrivals.get(frame.timestamp);
+    if (a) { delays.push(now - a); if (delays.length > 60) delays.shift(); arrivals.delete(frame.timestamp); }
+    try {
+      // Catching up (just connected and replaying since the last key frame): decode all, draw the newest.
+      if (!decoder || decoder.decodeQueueSize < 2) {
+        fpsCount++;
+        draw(frame);
+        if (lastFrame) lastFrame.close();
+        lastFrame = frame.clone();
+        havePicture = true;
+        idle.style.display = 'none';
+      }
+    } catch (e) { lastErr = String(e && e.message || e); } finally { frame.close(); }
+  }
+
+  function makeDecoder(c) {
+    if (decoder) { try { decoder.close(); } catch (e) {} }
+    codec = c;
+    var d = new VideoDecoder({
+      output: onOutput,
+      error: function (e) {
+        lastErr = String(e && e.message || e);
+        if (decoder === d) { decoder = null; rebuild(); }
+      }
+    });
+    d.configure({ codec: c, optimizeForLatency: true });
+    decoder = d;
+  }
+
+  // The decoder failed or lost its place. A phone will not send another full picture by itself,
+  // so ask the plugin again: a new stream starts with the last key frame and everything since.
+  function rebuild() {
+    needKey = true;
+    var now = Date.now();
+    if (now - lastRestart < 3000) { setTimeout(rebuild, 3000 - (now - lastRestart)); return; }
+    lastRestart = now;
+    restarts++;
+    if (streamAbort) { try { streamAbort.abort(); } catch (e) {} }
+  }
+
+  function onFrame(data, key, tsUs, arrivedMs) {
+    if (!data.length) return;   // keep-alive
+    if (key) {
+      var c = codecFrom(data);
+      if (c && (c !== codec || !decoder || decoder.state !== 'configured')) {
+        try { makeDecoder(c); } catch (e) { lastErr = String(e && e.message || e); decoder = null; return; }
+      }
+      if (decoder) needKey = false;
+    }
+    if (!decoder || needKey) { dropped++; return; }
+    if (arrivals.size > 600) arrivals.clear();
+    arrivals.set(tsUs, arrivedMs);
+    // Never skip frames here: every frame builds on the one before it.
+    try {
+      decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: tsUs, data: data }));
+    } catch (e) { lastErr = String(e && e.message || e); decoder = null; rebuild(); }
+  }
+
+  function connect() {
+    var ac = new AbortController();
+    streamAbort = ac;
+    needKey = true;
+    fetch(url('/stream'), { signal: ac.signal }).then(function (res) {
+      if (!res.ok || !res.body) throw new Error('stream ' + res.status);
+      var reader = res.body.getReader(), buf = new Uint8Array(0);
+      function pump() {
+        return reader.read().then(function (r) {
+          if (r.done) throw new Error('ended');
+          if (buf.length) {
+            var n = new Uint8Array(buf.length + r.value.length);
+            n.set(buf); n.set(r.value, buf.length); buf = n;
+          } else { buf = r.value; }
+          var off = 0;
+          while (buf.length - off >= HEADER) {
+            var dv = new DataView(buf.buffer, buf.byteOffset + off, HEADER);
+            var len = dv.getUint32(0), flags = dv.getUint8(4);
+            if (buf.length - off < HEADER + len) break;
+            var ts = dv.getUint32(5) * 4294967296 + dv.getUint32(9);
+            var arrived = dv.getUint32(13) * 4294967296 + dv.getUint32(17);
+            onFrame(buf.slice(off + HEADER, off + HEADER + len), (flags & 1) === 1, ts, arrived);
+            off += HEADER + len;
+          }
+          buf = off ? buf.slice(off) : buf;
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function () {}).then(function () {
+      if (streamAbort === ac) streamAbort = null;
+      setTimeout(connect, ac.signal.aborted ? 50 : 1000);
+    });
+  }
+
+  // A phone sends no video while its screen does not change, so "no new frames" means nothing:
+  // the last picture stays up as long as the phone is mirroring (the plugin sees its connection).
+  var notMirroring = 0, mirroringFor = 0;
+  function poll() {
+    var fps = fpsCount; fpsCount = 0;
+    var sorted = delays.slice().sort(function (a, b) { return a - b; });
+    fetch(url('/api/report'), { method: 'POST', body: JSON.stringify({
+      w: fw, h: fh, fps: fps, decoded: decoded, dropped: dropped, restarts: restarts, codec: codec,
+      error: lastErr, support: support, delay: sorted.length ? Math.round(sorted[sorted.length >> 1]) : 0
+    }) }).then(function (r) { return r.json(); }).then(function (st) {
+      deckName = st.name || '';
+      pictureLost = !!st.picture_lost;
+      if (!!st.fill !== fill) { fill = !!st.fill; redraw(); }
+      if ((st.pin || '') !== pin) {
+        pin = st.pin || '';
+        document.getElementById('pin').textContent = pin ? 'PIN for a new phone: ' + pin : '';
+      }
+      if (st.mirroring) { notMirroring = 0; mirroringFor++; } else { notMirroring++; mirroringFor = 0; }
+      if (notMirroring >= 2) {
+        if (havePicture) { havePicture = false; ctx.clearRect(0, 0, canvas.width, canvas.height); }
+        if (support === 'no-webcodecs' || support === 'no-h264') {
+          say('Steam\'s browser cannot decode this video', 'Open PiP Theater > Help > Check setup.');
+        } else if (st.receiver !== 'running') {
+          say('The AirPlay receiver is off', 'Turn it on in PiP Theater (Quick Access menu).');
+        } else if (st.connected) {
+          say('Phone connected (sound only)', 'Start Screen Mirroring to see its screen.');
+        } else {
+          say('Waiting for your phone', howTo());
+        }
+      } else if (st.mirroring && !havePicture && mirroringFor >= 4) {
+        say(pictureLost ? 'The picture needs a fresh start' : 'Waiting for the picture',
+            'If this stays, stop Screen Mirroring on the phone and start it again.');
+      }
+    }).catch(function () {});
+  }
+  setInterval(poll, 1000);
+  poll();
+
+  document.getElementById('shield').addEventListener('click', function (e) { e.preventDefault(); });
+  connect();
+})();
+</script>
+</body>
+</html>

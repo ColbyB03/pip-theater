@@ -2,8 +2,8 @@
 
 This guide covers three stages:
 
-1. Put the plugin on your own Deck and test it
-2. Share it publicly through GitHub (anyone can install it)
+1. Publish it on GitHub (GitHub builds the installable ZIP for you)
+2. Install it on your Deck and test it
 3. The official Decky Plugin Store, and a policy you need to know about first
 
 ---
@@ -20,7 +20,7 @@ Don't tick it anyway: it's a false statement, and the reviewers look for it.
 
 Your realistic options:
 
-- **Share it from GitHub (stage 2).** Many popular Decky plugins are distributed this
+- **Share it from GitHub (stages 1 and 2).** Many popular Decky plugins are distributed this
   way. Users install from a URL or ZIP in about 30 seconds.
 - **Make it your own code first.** If you learn the codebase and rewrite or substantially
   author it yourself until AI-written code is no longer the majority, you can then submit
@@ -28,130 +28,123 @@ Your realistic options:
 
 ---
 
-## Stage 1: install it on your Deck
+## Stage 1: publish it on GitHub
 
-### 1a. Build the ZIP (on your PC)
+The repository has a release workflow (`.github/workflows/release.yml`). GitHub builds the
+AirPlay receiver from source, builds the plugin, runs the tests, and attaches
+`pip-theater.zip` to a release. You don't build anything on your PC.
 
-```bash
-npm install
-```
+### 1a. Create the repository and push (one time)
 
-```bash
-npm run package
-```
-
-This creates `out/pip-theater.zip`.
-
-> On this Windows PC, if `npm run …` fails with `'"node"' is not recognized`, run the
-> steps directly:
-> `node node_modules/rollup/dist/bin/rollup -c` then `node scripts/package.mjs`
-
-### 1b. Get the ZIP onto the Deck
-
-Pick one:
-- Copy it with a USB stick or SD card, **or**
-- In Desktop Mode, download it from wherever you put it (Google Drive, GitHub, etc.), **or**
-- Use [Warpinator](https://flathub.org/apps/org.x.Warpinator) / KDE Connect to send it from your PC.
-
-Put it somewhere easy, like `~/Downloads/pip-theater.zip`.
-
-### 1c. Turn on Decky developer mode (one time)
-
-1. In Game Mode press **⋯** → Decky (plug icon) → ⚙️ **Settings**.
-2. Turn on **Developer mode**.
-3. A new **Developer** section appears in Decky's settings.
-
-### 1d. Install
-
-1. Decky Settings → **Developer** → **Install Plugin from ZIP File** → **Browse**.
-2. Pick `pip-theater.zip` and confirm.
-3. "PiP Theater" now shows in the Decky menu.
-
-### 1e. Set up the DRM browser (for Netflix, Disney+, etc.)
-
-1. Switch to **Desktop Mode** (Steam button → Power → Switch to Desktop).
-2. Open **Discover**, search for **Google Chrome** (or Microsoft Edge / Brave) and install it.
-3. Go back to Game Mode. You don't need to add Chrome to Steam.
-
-### 1f. Test checklist
-
-- [ ] YouTube plays in the PiP over a game (built-in engine)
-- [ ] Netflix opens, **Browse & control** lets you log in and pick a show, and it plays
-      in the PiP over a game (external engine)
-- [ ] Size presets, the snap grid and the sliders move and resize the window live
-- [ ] Opening the Quick Access menu moves the PiP out of the way
-- [ ] Play/pause, ±10 s, volume and mute work
-- [ ] Stop closes everything, including the background browser
-
-### 1g. If something goes wrong: logs
-
-- Plugin log: `~/homebrew/logs/PiP Theater/` (open it in Desktop Mode with Dolphin)
-- Frontend console: in Decky Developer settings, enable **Allow Remote CEF Debugging**,
-  then on your PC open Chrome → `chrome://inspect` → *Configure* → add `steamdeck:8081`
-  (or your Deck's IP address) and inspect **SharedJSContext**.
-
-You can send me (Claude) the log text and I'll help fix it.
-
----
-
-## Stage 2: share it on GitHub
-
-### 2a. One-time setup
-
-1. Create a free account at <https://github.com>.
-2. Edit these placeholders in the project:
-   - `plugin.json` → `"author"` and the `image` URL
-   - `LICENSE` → `YOUR_NAME_HERE`
-   - `package.json` → add `"author": "Your Name"`
-3. Optional: add a screenshot as `assets/preview.png`.
-
-### 2b. Create the repository and push
-
-On GitHub click **New repository**, name it `pip-theater`, keep it **Public**, and don't
-add a README (you already have one). Then in this folder:
+On GitHub click **New repository**, name it `pip-theater`, keep it **Public**, and don't add
+a README, license or .gitignore (the project has them). Then in this folder:
 
 ```bash
-git init
-```
-
-```bash
-git add .
-```
-
-```bash
-git commit -m "Initial release of PiP Theater"
-```
-
-```bash
-git branch -M main
-```
-
-```bash
-git remote add origin https://github.com/YOUR_GITHUB_USER/pip-theater.git
+git remote add origin https://github.com/ColbyB3/pip-theater.git
 ```
 
 ```bash
 git push -u origin main
 ```
 
-(`.gitignore` already keeps `node_modules/`, `dist/` and `out/` out of the repo.)
+If your GitHub user name is not `ColbyB3`, change it in that command, in `README.md` (the
+install URL), in `plugin.json` (`author`) and in `LICENSE`.
 
-### 2c. Publish a release
+### 1b. Publish a release
 
-1. Bump `"version"` in `package.json` (for example `0.1.0`), rebuild with `npm run package`.
-2. On GitHub: your repo → **Releases** → **Draft a new release**.
-3. Tag: `v0.1.0`. Title: `PiP Theater 0.1.0`. Describe what's new.
-4. Attach `out/pip-theater.zip`, then **Publish release**.
+1. Set `"version"` in `package.json` (for example `0.2.0`) and commit.
+2. Tag it and push the tag:
 
-### 2d. Tell people how to install
+```bash
+git tag v0.2.0
+```
 
-Put this in your README or a Reddit post (r/SteamDeck, r/DeckyLoader):
+```bash
+git push origin v0.2.0
+```
 
-> 1. Decky → Settings → enable **Developer mode**.
-> 2. Developer → **Install Plugin from URL** and paste:
->    `https://github.com/YOUR_GITHUB_USER/pip-theater/releases/latest/download/pip-theater.zip`
+3. On GitHub, open the **Actions** tab and watch the **Release** run (about 5 minutes).
+   When it is green, the release with `pip-theater.zip` is on the **Releases** page.
 
-For each update: bump the version, rebuild, create a new release with the new ZIP.
+If the run fails, open it, copy the red step's log, and send it to me (Claude).
+
+To try a build without making a release: **Actions** > **Release** > **Run workflow**. The
+ZIP is then attached to that run as an artifact.
+
+### 1c. Updates
+
+Change the code, bump the version, commit, tag (`v0.2.1`...), push the tag. People who
+installed from the URL below get the new version by installing from the same URL again.
+
+---
+
+## Stage 2: install it on your Deck
+
+### 2a. Turn on Decky developer mode (one time)
+
+1. In Game Mode press **...** > Decky (plug icon) > gear icon.
+2. Turn on **Developer mode**. A **Developer** section appears in Decky's settings.
+
+### 2b. Install
+
+**Developer** > **Install Plugin from URL**, and enter:
+
+```
+https://github.com/ColbyB3/pip-theater/releases/latest/download/pip-theater.zip
+```
+
+"PiP Theater" now shows in the Decky menu.
+
+Without GitHub (to test a ZIP built on this PC): copy `out/pip-theater.zip` to the Deck
+(USB stick, SD card, KDE Connect...) and use **Developer** > **Install Plugin from ZIP File**.
+A ZIP built on this PC only has the AirPlay receiver if `bin/uxplay-steamos/` exists here;
+`node scripts/package.mjs` warns when it doesn't.
+
+### 2c. Set up the DRM browser (for Netflix, Disney+, etc.)
+
+1. Switch to **Desktop Mode** (Steam button > Power > Switch to Desktop).
+2. Open **Discover**, search for **Google Chrome** (or Microsoft Edge / Brave) and install it.
+3. Go back to Game Mode. You don't need to add Chrome to Steam.
+
+### 2d. Test checklist
+
+Phone mirror:
+- [ ] The Deck shows up under Screen Mirroring on the phone
+- [ ] The window opens over a game, with picture and sound
+- [ ] Rotating the phone reshapes the window
+- [ ] The phone volume slider changes only the phone's sound
+- [ ] Stopping mirroring closes the window after a few seconds
+- [ ] With "Approved phones (PIN)", the phone asks for the PIN and a notification shows it
+- [ ] After the Deck sleeps and wakes, the phone can connect again
+
+Streaming:
+- [ ] YouTube plays in the window over a game (built-in engine)
+- [ ] Netflix opens, **Browse & control** lets you log in and pick a show, and it plays in
+      the window over a game (external engine)
+- [ ] Play/pause, ±10 s, volume and mute work
+- [ ] Stop closes everything, including the background browser
+
+Window:
+- [ ] Size presets, the snap grid and the sliders move and resize the window live
+- [ ] Opening the Quick Access menu moves the window out of the way
+
+### 2e. If something goes wrong
+
+- **PiP Theater > Help > Check setup** shows which part fails.
+- **Help > Save problem report** writes a text file to `~/Downloads`. Send me (Claude) its
+  text and I'll help fix it.
+- Plugin log: `~/homebrew/logs/PiP Theater/`
+- Frontend console: in Decky Developer settings, enable **Allow Remote CEF Debugging**,
+  then on your PC open Chrome > `chrome://inspect` > *Configure* > add `steamdeck:8081`
+  (or your Deck's IP address) and inspect **SharedJSContext**.
+
+### 2f. Tell people how to install
+
+Put this in a Reddit post (r/SteamDeck, r/DeckyLoader) or anywhere else:
+
+> 1. Decky > Settings > enable **Developer mode**.
+> 2. Developer > **Install Plugin from URL** and paste:
+>    `https://github.com/ColbyB3/pip-theater/releases/latest/download/pip-theater.zip`
 
 ---
 
@@ -168,7 +161,7 @@ Their CI then builds the ZIP from your source, so you don't upload the ZIP yours
 - **Test two other plugins' open PRs** in the database repo and leave a written testing
   report on each. This is required, and you link those comments from your PR.
 - Explain how your plugin differs from the existing "Picture in Picture" plugin. Here:
-  DRM support for Netflix/Disney+ via the external-browser engine.
+  phone mirroring, and DRM support for Netflix/Disney+ via the external-browser engine.
 - Read the review/testing page linked from the PR template:
   <https://wiki.deckbrew.xyz/plugin-dev/review-and-testing>
 
@@ -178,7 +171,7 @@ Their CI then builds the ZIP from your source, so you don't upload the ZIP yours
 2. Clone your fork and add your plugin:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USER/decky-plugin-database.git
+git clone https://github.com/ColbyB3/decky-plugin-database.git
 ```
 
 ```bash
@@ -190,7 +183,7 @@ git checkout -b add/pip-theater
 ```
 
 ```bash
-git submodule add https://github.com/YOUR_GITHUB_USER/pip-theater.git plugins/pip-theater
+git submodule add https://github.com/ColbyB3/pip-theater.git plugins/pip-theater
 ```
 
 ```bash

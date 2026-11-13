@@ -1,0 +1,59 @@
+name: Release
+
+# Builds the installable plugin ZIP, including the AirPlay receiver built from source.
+#   - push a tag like v0.2.0  -> builds and publishes a GitHub release with pip-theater.zip
+#   - "Run workflow" button    -> builds only; the ZIP is attached to the run as an artifact
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the AirPlay receiver (UxPlay) for SteamOS
+        run: |
+          docker run --rm -e UXPLAY_REF="$(cat receiver/UXPLAY_REF)" -v "$PWD/receiver:/work" \
+            debian:bookworm bash /work/build-uxplay.sh
+          sudo chown -R "$(id -u):$(id -g)" receiver/out
+          mkdir -p bin
+          cp -a receiver/out/uxplay-steamos bin/
+
+      - name: Check that the receiver starts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good
+          sh bin/uxplay-steamos/run.sh -h > receiver-help.txt 2>&1 || true
+          head -20 receiver-help.txt
+          grep -qi "airplay" receiver-help.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: python3 -m unittest discover -s tests -v
+      - run: npm run package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pip-theater
+          path: |
+            out/pip-theater.zip
+            receiver/out/third-party-sources.tar
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" out/pip-theater.zip receiver/out/third-party-sources.tar \
+            --title "PiP Theater $GITHUB_REF_NAME" --generate-notes

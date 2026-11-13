@@ -25,12 +25,32 @@ const MAIN_MENU_FRACTION = 0.28;
 
 export type OpenMenu = "none" | "main" | "qam";
 
-export function computeRect(s: Settings, screen: Size, menu: OpenMenu): Rect {
-  const ar = ASPECTS[s.aspect] ?? 16 / 9;
+/** A portrait phone, until the real picture says otherwise. */
+export const PHONE_ASPECT = 9 / 19.5;
+
+export interface Shape {
+  /** width / height */
+  aspect: number;
+  /**
+   * Give the window the same area as a 16:9 window of the chosen size, whatever its shape.
+   * Used for the phone: a tall portrait window and a wide landscape one then look "the same size",
+   * instead of the portrait one being a sliver.
+   */
+  equalArea?: boolean;
+}
+
+export function computeRect(s: Settings, screen: Size, menu: OpenMenu, shape?: Shape): Rect {
+  const wanted = shape?.aspect ?? ASPECTS[s.aspect] ?? 16 / 9;
+  const ar = wanted > 0.2 && wanted < 5 ? wanted : 16 / 9;
   const m = Math.round(s.margin * screen.h);
 
   let width = s.size * screen.w;
   let height = width / ar;
+  if (shape?.equalArea) {
+    const area = (s.size * screen.w * (s.size * screen.w)) / (16 / 9);
+    width = Math.sqrt(area * ar);
+    height = Math.sqrt(area / ar);
+  }
   const maxH = screen.h - 2 * m;
   const maxW = screen.w - 2 * m;
   if (height > maxH) {

@@ -1,11 +1,11 @@
 import { addEventListener, callable, removeEventListener, toaster } from "@decky/api";
-import { getGamepadNavigationTrees, Router } from "@decky/ui";
 import { CdpClient, connectToPage } from "./cdp";
 import { steamSupportsWidevine } from "./drm";
-import { computeRect, hiddenByMenu, OpenMenu, Rect, Size } from "./geometry";
+import { computeRect, hiddenByMenu, Rect, Size } from "./geometry";
 import { MediaCommand, mediaScript } from "./media";
 import { settings } from "./settings";
 import { Engine, EngineChoice, normalizeUrl, resolveEngine } from "./sites";
+import { openMenu, overlay, SteamView, uiScreen } from "./steam";
 import { Store } from "./store";
 
 // --------------------------------------------------------------------------- //
@@ -64,43 +64,6 @@ interface NormRect {
 }
 
 // --------------------------------------------------------------------------- //
-// Steam UI helpers
-// --------------------------------------------------------------------------- //
-
-function mainWindow(): any {
-  return (Router as any)?.WindowStore?.GamepadUIMainWindowInstance;
-}
-
-export function uiScreen(): Size {
-  const w: Window | undefined = mainWindow()?.BrowserWindow;
-  return { w: w?.innerWidth || 1280, h: w?.innerHeight || 800 };
-}
-
-function quickAccessHiddenFallback(): boolean | null {
-  try {
-    const tree = getGamepadNavigationTrees().find((t: any) => t?.id === "QuickAccess-NA");
-    const doc: Document | undefined = tree?.m_Root?.m_element?.ownerDocument;
-    return doc ? doc.hidden : null;
-  } catch {
-    return null;
-  }
-}
-
-export function openMenu(): OpenMenu {
-  try {
-    const store = mainWindow()?.MenuStore;
-    const v = store?.GetOpenSideMenu?.() ?? store?.m_eOpenSideMenu;
-    if (v === 1) return "main";
-    if (v === 2) return "qam";
-    if (v === 0) return "none";
-  } catch {
-    /* fall through */
-  }
-  const hidden = quickAccessHiddenFallback();
-  return hidden === false ? "qam" : "none";
-}
-
-// --------------------------------------------------------------------------- //
 // Engines
 // --------------------------------------------------------------------------- //
 
@@ -118,63 +81,35 @@ interface PlayerEngine {
 /** Steam's own embedded browser view. Fast and fully integrated, but no Widevine DRM. */
 class BuiltinEngine implements PlayerEngine {
   readonly kind = "builtin" as const;
-  private view: any = null;
-  private lastLayout = "";
+  private view = new SteamView("pip-theater");
 
   async start(url: string) {
-    const win = mainWindow();
-    if (!win?.CreateBrowserView) throw new Error("Steam's browser view API is not available.");
-    this.view = win.CreateBrowserView("pip-theater", {
-      strInitialURL: url,
-      bOnlyAllowTrustedPopups: true,
-    });
-    const browser = this.view.GetBrowser();
-    try {
-      browser.SetWindowStackingOrder?.(1); // keep above other Steam views
-    } catch {
-      /* optional */
-    }
-    browser.SetFocus?.(false);
-    this.view.LoadURL(url);
+    if (!this.view.create()) throw new Error(this.view.error || "Steam's browser view is not available.");
+    this.view.load(url);
   }
 
   navigate(url: string) {
-    this.view?.LoadURL(url);
+    this.view.navigate(url);
   }
 
   layout(rect: Rect, _screen: Size, visible: boolean, focus: boolean) {
-    const browser = this.view?.GetBrowser();
-    if (!browser) return;
-    const key = JSON.stringify([rect, visible, focus]);
-    if (key === this.lastLayout) return;
-    this.lastLayout = key;
-    browser.SetBounds(rect.x, rect.y, rect.width, rect.height);
-    browser.SetVisible(visible);
-    browser.SetFocus?.(focus);
+    this.view.layout(rect, visible, focus);
   }
 
   run(script: string) {
-    // A `javascript:` URL whose body evaluates to undefined runs in the current page
-    // without navigating. Skip while a page is loading so we never cancel a navigation.
-    if (!this.view || this.view.m_bLoading) return;
-    this.view.GetBrowser().LoadURL("javascript:" + encodeURIComponent("void " + script.replace(/;\s*$/, "")));
+    this.view.run(script);
   }
 
   back() {
-    this.view?.GoBack?.();
+    this.view.back();
   }
 
   reload() {
-    this.view?.Reload?.();
+    this.view.reload();
   }
 
   async stop() {
-    try {
-      this.view?.Destroy();
-    } catch (e) {
-      console.error("[PiP Theater] destroy view failed", e);
-    }
-    this.view = null;
+    this.view.destroy();
   }
 }
 
@@ -272,12 +207,17 @@ function normRect(rect: Rect, screen: Size): NormRect {
 }
 
 export function applyLayout() {
-  if (!engine) return;
+  if (!engine) {
+    overlay.set({ site: false });
+    return;
+  }
   const rt = runtime.get();
   const s = settings.get();
   const screen = uiScreen();
 
   if (rt.browsing) {
+    // The Browse page is a full Steam page: Steam's UI is in front anyway, no overlay needed.
+    overlay.set({ site: false });
     if (engine.kind === "builtin" && rt.browseRect) {
       engine.layout(rt.browseRect, screen, true, true);
     } else {
@@ -291,6 +231,8 @@ export function applyLayout() {
   const rect = computeRect(s, screen, menu);
   const visible = !rt.hidden && !hiddenByMenu(s.menuBehavior, menu);
   engine.layout(rect, screen, visible, false);
+  // Steam's own view needs Steam's UI layer drawn over the game; the external browser is its own overlay.
+  overlay.set({ site: engine.kind === "builtin" && visible });
 }
 
 function applyMediaState(force = false) {
@@ -340,6 +282,7 @@ export async function play(rawUrl: string, choice?: EngineChoice) {
 async function stopEngine() {
   const e = engine;
   engine = null;
+  overlay.set({ site: false });
   if (e) await e.stop().catch(console.error);
 }
 

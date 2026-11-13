@@ -1,0 +1,169 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PiP Theater panel preview</title>
+<style>
+  body { margin: 0; background: #1b2028; color: #dcdedf; font: 13px/1.35 Arial, sans-serif; }
+  #wrap { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
+  #screenbox { flex: 1; min-width: 0; }
+  #screen { position: relative; width: 1280px; height: 800px; transform-origin: 0 0; overflow: hidden;
+    background: repeating-linear-gradient(45deg, #24402f, #24402f 40px, #1d3527 40px, #1d3527 80px); }
+  #screen .game { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 60px; color: #ffffff22; }
+  #qam { width: 310px; flex: none; background: #0e141b; padding: 8px; max-height: 96vh; overflow: auto; }
+  .sec { margin-bottom: 10px; } .sec > h4 { margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; opacity: .6; }
+  .row { padding: 3px 0; border-bottom: 1px solid #ffffff10; }
+  button { background: #2a3440; color: #fff; border: 0; border-radius: 3px; padding: 6px; cursor: pointer; font: inherit; }
+  button:disabled { opacity: .4; }
+  .desc { font-size: 11px; opacity: .65; }
+  .field { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+  input[type=text] { width: 100%; box-sizing: border-box; }
+  #log { font: 11px monospace; white-space: pre-wrap; opacity: .8; padding: 0 12px 12px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="screenbox"><div id="screen"><div class="game">GAME</div></div></div>
+  <div id="qam"><div id="title"></div><div id="panel"></div><div id="global"></div><div id="route"></div></div>
+</div>
+<div id="log"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script>
+(function () {
+  var R = window.React, h = R.createElement;
+  var logEl = document.getElementById('log');
+  window.harnessLog = [];
+  function note(t) { window.harnessLog.push(t); logEl.textContent = window.harnessLog.slice(-12).join('\n'); }
+  window.addEventListener('error', function (e) { note('ERROR ' + e.message); });
+  window.addEventListener('unhandledrejection', function (e) { note('REJECTION ' + (e.reason && e.reason.message || e.reason)); });
+
+  // ---- the screen: 1280x800 scaled to fit
+  var screen = document.getElementById('screen'), box = document.getElementById('screenbox');
+  function fit() { var k = Math.min(1, box.clientWidth / 1280); screen.style.transform = 'scale(' + k + ')'; box.style.height = 800 * k + 'px'; }
+  window.addEventListener('resize', fit); fit();
+
+  // ---- React / JSX runtime the bundle expects
+  window.SP_REACT = R;
+  function jsx(type, props, key) { return h(type, key === undefined ? props : Object.assign({}, props, { key: key })); }
+  window.SP_JSX = { jsx: jsx, jsxs: jsx, Fragment: R.Fragment };
+  window.SP_REACTDOM = window.ReactDOM;
+
+  // ---- stand-in Steam browser view: an iframe on the screen
+  window.fakeViews = {};
+  function CreateBrowserView(name) {
+    var f = document.createElement('iframe');
+    f.style.cssText = 'position:absolute;border:0;display:none;background:#000';
+    screen.appendChild(f);
+    var info = window.fakeViews[name] = { url: '', visible: false, bounds: null, destroyed: false };
+    var browser = {
+      SetBounds: function (x, y, w, hh) { info.bounds = [x, y, w, hh]; f.style.left = x + 'px'; f.style.top = y + 'px'; f.style.width = w + 'px'; f.style.height = hh + 'px'; },
+      SetVisible: function (v) { info.visible = v; f.style.display = v ? 'block' : 'none'; },
+      SetFocus: function () {},
+      LoadURL: function (u) { if (u.indexOf('javascript:') !== 0) { info.url = u; f.src = u; } }
+    };
+    return {
+      m_bLoading: false,
+      GetBrowser: function () { return browser; },
+      LoadURL: browser.LoadURL,
+      GoBack: function () {}, Reload: function () {},
+      Destroy: function () { info.destroyed = true; f.remove(); }
+    };
+  }
+
+  // ---- stand-in @decky/ui
+  var P = function (cls) { return function (p) { return h('div', { className: cls, style: p.style }, p.children); }; };
+  window.DFL = {
+    PanelSection: function (p) { return h('div', { className: 'sec' }, p.title ? h('h4', null, p.title) : null, p.children); },
+    PanelSectionRow: P('row'),
+    Focusable: P('focusable'),
+    DialogButton: function (p) { return h('button', { style: p.style, disabled: p.disabled, onClick: p.onClick }, p.children); },
+    ButtonItem: function (p) {
+      return h('div', null, h('button', { style: { width: '100%' }, disabled: p.disabled, onClick: p.onClick }, p.children),
+        p.description ? h('div', { className: 'desc' }, p.description) : null);
+    },
+    Field: function (p) {
+      return h('div', null, h('div', { className: 'field' }, h('b', null, p.label), p.children),
+        p.description ? h('div', { className: 'desc' }, p.description) : null);
+    },
+    ToggleField: function (p) {
+      return h('div', null, h('label', { className: 'field' }, h('span', null, p.label),
+        h('input', { type: 'checkbox', checked: !!p.checked, disabled: p.disabled, 'data-label': p.label, onChange: function (e) { p.onChange(e.target.checked); } })),
+        p.description ? h('div', { className: 'desc' }, p.description) : null);
+    },
+    DropdownItem: function (p) {
+      var idx = p.rgOptions.findIndex(function (o) { return o.data === p.selectedOption; });
+      return h('div', null, h('label', { className: 'field' }, h('span', null, p.label),
+        h('select', { value: idx, disabled: p.disabled, 'data-label': p.label, onChange: function (e) { p.onChange(p.rgOptions[+e.target.value]); } },
+          idx < 0 ? h('option', { value: -1 }, p.strDefaultLabel || '') : null,
+          p.rgOptions.map(function (o, i) { return h('option', { key: i, value: i }, o.label); }))),
+        p.description ? h('div', { className: 'desc' }, p.description) : null);
+    },
+    SliderField: function (p) {
+      return h('div', null, h('label', { className: 'field' }, h('span', null, p.label + (p.showValue ? ' ' + p.value + (p.valueSuffix || '') : '')),
+        h('input', { type: 'range', min: p.min, max: p.max, step: p.step, value: p.value, 'data-label': p.label, onChange: function (e) { p.onChange(+e.target.value); } })),
+        p.description ? h('div', { className: 'desc' }, p.description) : null);
+    },
+    TextField: function (p) {
+      return h('div', null, p.label ? h('span', null, p.label) : null,
+        h('input', { type: 'text', value: p.value || '', placeholder: p.placeholder, 'data-label': p.label, onChange: p.onChange }));
+    },
+    Navigation: { Navigate: function (r) { note('navigate ' + r); showRoute(r); }, NavigateBack: function () { showRoute(null); }, CloseSideMenus: function () {} },
+    staticClasses: { Title: 'title' },
+    getGamepadNavigationTrees: function () { return []; },
+    findModuleChild: function () { return undefined; },
+    Router: { WindowStore: { GamepadUIMainWindowInstance: {
+      BrowserWindow: { innerWidth: 1280, innerHeight: 800 },
+      MenuStore: { GetOpenSideMenu: function () { return window.fakeMenu || 0; } },
+      CreateBrowserView: CreateBrowserView } } }
+  };
+
+  // ---- stand-in Decky loader
+  var routes = {}, globals = {};
+  function call(method, args) {
+    return fetch('/call', { method: 'POST', body: JSON.stringify({ method: method, args: args }) })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { if (j.error) throw new Error(j.error); return j.result; });
+  }
+  window.__DECKY_SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED_deckyLoaderAPIInit = {
+    connect: function (version) {
+      return {
+        _version: version,
+        callable: function (method) { return function () { return call(method, Array.prototype.slice.call(arguments)); }; },
+        addEventListener: function (_e, fn) { return fn; },
+        removeEventListener: function () {},
+        toaster: { toast: function (t) { note('TOAST ' + t.title + ': ' + t.body); } },
+        routerHook: {
+          addRoute: function (path, comp) { routes[path] = comp; },
+          removeRoute: function (path) { delete routes[path]; },
+          addGlobalComponent: function (name, comp) { globals[name] = comp; renderGlobals(); },
+          removeGlobalComponent: function (name) { delete globals[name]; renderGlobals(); }
+        }
+      };
+    }
+  };
+
+  var roots = {};
+  function root(id) { return roots[id] || (roots[id] = ReactDOM.createRoot(document.getElementById(id))); }
+  function renderGlobals() { root('global').render(h(R.Fragment, null, Object.keys(globals).map(function (k) { return h(globals[k], { key: k }); }))); }
+  function showRoute(path) { root('route').render(path && routes[path] ? h(routes[path]) : null); }
+
+  class Boundary extends R.Component {
+    constructor(p) { super(p); this.state = { err: null }; }
+    static getDerivedStateFromError(err) { return { err: err }; }
+    componentDidCatch(err) { note('RENDER ERROR ' + err.message); }
+    render() { return this.state.err ? h('pre', { style: { color: '#f88' } }, String(this.state.err.stack || this.state.err)) : this.props.children; }
+  }
+
+  import('/dist/index.js').then(function (mod) {
+    var plugin = mod.default();
+    window.plugin = plugin;
+    root('title').render(plugin.titleView);
+    root('panel').render(h(Boundary, null, plugin.content));
+    note('plugin loaded: ' + plugin.name);
+  }).catch(function (e) { note('LOAD ERROR ' + (e && e.stack || e)); });
+})();
+</script>
+</body>
+</html>

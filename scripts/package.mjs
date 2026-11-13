@@ -1,10 +1,11 @@
 // Builds out/pip-theater.zip in the layout Decky Loader expects:
 //   pip-theater/
 //     dist/index.js, main.py, plugin.json, package.json, LICENSE, README.md
-//     backend/overlay_helper.py
+//     backend/*.py, assets/player.html
+//     bin/uxplay-steamos/...   (the AirPlay receiver, when it has been built: see receiver/)
 // No dependencies: a tiny ZIP writer on top of Node's zlib.
 import { deflateRawSync, crc32 } from "node:zlib";
-import { mkdirSync, readFileSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync, existsSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -18,6 +19,9 @@ const files = [
   "LICENSE",
   "README.md",
   "backend/overlay_helper.py",
+  "backend/mirror.py",
+  "backend/h264.py",
+  "assets/player.html",
 ];
 
 for (const f of files) {
@@ -26,6 +30,24 @@ for (const f of files) {
     process.exit(1);
   }
 }
+
+// The AirPlay receiver is built separately (receiver/build-uxplay.sh, or the release workflow).
+const receiver = "bin/uxplay-steamos";
+function walk(rel) {
+  for (const name of readdirSync(join(root, rel)).sort()) {
+    const child = `${rel}/${name}`;
+    if (statSync(join(root, child)).isDirectory()) walk(child);
+    else files.push(child);
+  }
+}
+if (existsSync(join(root, receiver, "uxplay")) && existsSync(join(root, receiver, "VERSION"))) {
+  walk(receiver);
+} else {
+  console.warn(`WARNING: ${receiver} is missing. This ZIP will have no AirPlay receiver: phone mirroring`);
+  console.warn("         will not work with it (streaming sites will). See receiver/build-uxplay.sh.");
+}
+
+const executable = (rel) => /(^|\/)(uxplay|run\.sh)$/.test(rel) || /\.so(\.|$)/.test(rel);
 
 const entries = [];
 const chunks = [];
@@ -58,7 +80,7 @@ for (const rel of files) {
   local.writeUInt16LE(0, 28);
 
   chunks.push(local, name, compressed);
-  entries.push({ name, crc, csize: compressed.length, size: data.length, time, date, offset });
+  entries.push({ name, crc, csize: compressed.length, size: data.length, time, date, offset, mode: executable(rel) ? 0o100755 : 0o100644 });
   offset += local.length + name.length + compressed.length;
 }
 
@@ -77,7 +99,7 @@ for (const e of entries) {
   h.writeUInt32LE(e.csize, 20);
   h.writeUInt32LE(e.size, 24);
   h.writeUInt16LE(e.name.length, 28);
-  h.writeUInt32LE((0o100644 << 16) >>> 0, 38); // -rw-r--r--
+  h.writeUInt32LE((e.mode << 16) >>> 0, 38); // Unix permissions
   h.writeUInt32LE(e.offset, 42);
   central.push(h, e.name);
   centralSize += h.length + e.name.length;
@@ -93,4 +115,4 @@ end.writeUInt32LE(offset, 16);
 mkdirSync(join(root, "out"), { recursive: true });
 const outPath = join(root, "out", `${folder}.zip`);
 writeFileSync(outPath, Buffer.concat([...chunks, ...central, end]));
-console.log(`Wrote ${outPath}`);
+console.log(`Wrote ${outPath} (${entries.length} files)`);

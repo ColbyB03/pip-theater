@@ -3,6 +3,8 @@ PiP Theater - Decky backend.
 
 Responsibilities:
   * persist the plugin settings (sizes, positions, bookmarks, ...)
+  * phone mirroring (backend/mirror.py): run the AirPlay receiver and feed its video to
+    the PiP page
   * drive the "External browser" engine used for DRM sites (Netflix, Disney+, ...):
       - launch a Flatpak Chromium-based browser (Chrome / Edge / Brave ship Widevine)
       - start backend/overlay_helper.py, which turns that browser into a gamescope
@@ -16,11 +18,15 @@ import json
 import os
 import signal
 import socket
+import sys
 import urllib.request
 
 import decky  # provided by Decky Loader at runtime
 
 PLUGIN_DIR = decky.DECKY_PLUGIN_DIR
+sys.path.insert(0, os.path.join(PLUGIN_DIR, "backend"))
+
+from mirror import DEFAULT_OPTIONS as MIRROR_DEFAULTS, Mirror, load_json  # noqa: E402
 SETTINGS_FILE = os.path.join(decky.DECKY_PLUGIN_SETTINGS_DIR, "settings.json")
 HELPER = os.path.join(PLUGIN_DIR, "backend", "overlay_helper.py")
 WINDOW_CLASS = "PiPTheaterBrowser"
@@ -317,8 +323,21 @@ class ExternalBrowser:
 # Plugin API (called from the frontend via @decky/api `callable`)
 # --------------------------------------------------------------------------- #
 
+def _plugin_version() -> str:
+    data = load_json(os.path.join(PLUGIN_DIR, "package.json"), {})
+    return str(data.get("version", "0")) if isinstance(data, dict) else "0"
+
+
+def _stored_mirror_options() -> dict:
+    """The mirror options as last saved by the panel (so the receiver starts with Steam)."""
+    data = load_json(SETTINGS_FILE, {})
+    opts = data.get("mirror") if isinstance(data, dict) else None
+    return opts if isinstance(opts, dict) else dict(MIRROR_DEFAULTS)
+
+
 class Plugin:
     external: ExternalBrowser
+    mirror: Mirror
 
     async def get_settings(self):
         try:
@@ -334,6 +353,28 @@ class Plugin:
             json.dump(settings, f, indent=2)
         os.replace(tmp, SETTINGS_FILE)
         return True
+
+    # ---- phone mirroring -------------------------------------------------- #
+
+    async def mirror_state(self):
+        return self.mirror.state()
+
+    async def mirror_configure(self, options: dict):
+        return await self.mirror.configure(options)
+
+    async def mirror_retry(self):
+        return await self.mirror.retry()
+
+    async def mirror_forget_phones(self):
+        return await self.mirror.forget_phones()
+
+    async def mirror_check(self):
+        return await self.mirror.system_check()
+
+    async def mirror_report(self, extra: str = ""):
+        return await self.mirror.save_report(extra)
+
+    # ---- external browser (DRM sites) ------------------------------------- #
 
     async def list_browsers(self):
         return [{"id": i, "name": n} for i, n in KNOWN_BROWSERS if _flatpak_installed(i)]
@@ -364,9 +405,18 @@ class Plugin:
 
     async def _main(self):
         self.external = ExternalBrowser()
+        self.mirror = Mirror(plugin_dir=PLUGIN_DIR, settings_dir=decky.DECKY_PLUGIN_SETTINGS_DIR,
+                             home=decky.DECKY_USER_HOME, user=decky.DECKY_USER, log=decky.logger,
+                             version=_plugin_version())
+        try:
+            await self.mirror.start(_stored_mirror_options())
+        except Exception as exc:  # noqa: BLE001 (streaming sites must keep working regardless)
+            self.mirror.start_error = f"Phone mirroring could not start: {exc}"
+            decky.logger.exception("mirror start failed")
         decky.logger.info("PiP Theater backend loaded")
 
     async def _unload(self):
+        await self.mirror.stop()
         await self.external.stop()
         decky.logger.info("PiP Theater backend unloaded")
 

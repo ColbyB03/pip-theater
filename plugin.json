@@ -1,11 +1,18 @@
 {
   "name": "PiP Theater",
-  "author": "YOUR_NAME_HERE",
+  "author": "ColbyB3",
   "flags": [],
   "api_version": 1,
   "publish": {
-    "tags": ["video", "streaming", "picture-in-picture", "overlay"],
-    "description": "Watch Netflix, Disney+, YouTube, Twitch and more in a resizable, movable picture-in-picture window on top of your games.",
-    "image": "https://raw.githubusercontent.com/YOUR_GITHUB_USER/pip-theater/main/assets/preview.png"
+    "tags": [
+      "video",
+      "streaming",
+      "picture-in-picture",
+      "overlay",
+      "airplay",
+      "mirror"
+    ],
+    "description": "A resizable, movable picture-in-picture window over your games: mirror your phone's screen (AirPlay), or play Netflix, Disney+, YouTube, Twitch and more on the Deck.",
+    "image": ""
   }
 }
