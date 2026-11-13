@@ -61,7 +61,7 @@ You need [Decky Loader](https://decky.xyz) on your Steam Deck.
 2. **Developer** > **Install Plugin from URL**, and enter:
 
    ```
-   https://github.com/ColbyB3/pip-theater/releases/latest/download/pip-theater.zip
+   https://github.com/ColbyB03/pip-theater/releases/latest/download/pip-theater.zip
    ```
 
 Or download `pip-theater.zip` from the [Releases](../../releases) page and use

@@ -40,14 +40,14 @@ On GitHub click **New repository**, name it `pip-theater`, keep it **Public**, a
 a README, license or .gitignore (the project has them). Then in this folder:
 
 ```bash
-git remote add origin https://github.com/ColbyB3/pip-theater.git
+git remote add origin https://github.com/ColbyB03/pip-theater.git
 ```
 
 ```bash
 git push -u origin main
 ```
 
-If your GitHub user name is not `ColbyB3`, change it in that command, in `README.md` (the
+If your GitHub user name is not `ColbyB03`, change it in that command, in `README.md` (the
 install URL), in `plugin.json` (`author`) and in `LICENSE`.
 
 ### 1b. Publish a release
@@ -90,7 +90,7 @@ installed from the URL below get the new version by installing from the same URL
 **Developer** > **Install Plugin from URL**, and enter:
 
 ```
-https://github.com/ColbyB3/pip-theater/releases/latest/download/pip-theater.zip
+https://github.com/ColbyB03/pip-theater/releases/latest/download/pip-theater.zip
 ```
 
 "PiP Theater" now shows in the Decky menu.
@@ -144,7 +144,7 @@ Put this in a Reddit post (r/SteamDeck, r/DeckyLoader) or anywhere else:
 
 > 1. Decky > Settings > enable **Developer mode**.
 > 2. Developer > **Install Plugin from URL** and paste:
->    `https://github.com/ColbyB3/pip-theater/releases/latest/download/pip-theater.zip`
+>    `https://github.com/ColbyB03/pip-theater/releases/latest/download/pip-theater.zip`
 
 ---
 
@@ -171,7 +171,7 @@ Their CI then builds the ZIP from your source, so you don't upload the ZIP yours
 2. Clone your fork and add your plugin:
 
 ```bash
-git clone https://github.com/ColbyB3/decky-plugin-database.git
+git clone https://github.com/ColbyB03/decky-plugin-database.git
 ```
 
 ```bash
@@ -183,7 +183,7 @@ git checkout -b add/pip-theater
 ```
 
 ```bash
-git submodule add https://github.com/ColbyB3/pip-theater.git plugins/pip-theater
+git submodule add https://github.com/ColbyB03/pip-theater.git plugins/pip-theater
 ```
 
 ```bash
