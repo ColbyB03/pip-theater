@@ -14,11 +14,13 @@ Responsibilities:
 """
 
 import asyncio
+import collections
 import json
 import os
 import signal
 import socket
 import sys
+import time
 import urllib.request
 
 import decky  # provided by Decky Loader at runtime
@@ -126,6 +128,50 @@ def _signal_group(pid: int, sig) -> None:
             pass
 
 
+def _profile_pids(profile: str) -> list:
+    """Every process started with our browser profile (flatpak, its sandbox, the browser)."""
+    pids = []
+    needle = profile.encode()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit() or int(pid) == os.getpid():
+            continue
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                if needle in f.read():
+                    pids.append(int(pid))
+        except OSError:
+            pass
+    return pids
+
+
+async def _clear_profile(profile: str) -> int:
+    """Stops a browser left over on this profile and removes its lock files.
+
+    A browser that survived an earlier run (plugin update, Decky restart, crash) still owns the
+    profile; a new browser would then hand its page to the old one and exit at once.
+    """
+    found = _profile_pids(profile)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        pids = _profile_pids(profile)
+        if not pids:
+            break
+        for pid in pids:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        for _ in range(30):
+            await asyncio.sleep(0.1)
+            if not _profile_pids(profile):
+                break
+    for name in ("SingletonLock", "SingletonSocket", "SingletonCookie"):
+        try:
+            os.unlink(os.path.join(profile, name))
+        except OSError:
+            pass
+    return len(found)
+
+
 def _http_json(url: str, timeout: float = 2.0):
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (localhost only)
         return json.loads(resp.read().decode())
@@ -145,6 +191,10 @@ class ExternalBrowser:
         self.visible = True
         self._ready = asyncio.Event()
         self._tasks = []
+        self.profile = None
+        self.output = collections.deque(maxlen=40)   # the browser's last messages
+        self.last_exit = None                        # (exit code, seconds it ran)
+        self.started_at = 0.0
 
     @property
     def running(self) -> bool:
@@ -186,6 +236,12 @@ class ExternalBrowser:
         self.port = _free_port()
         profile = os.path.join(decky.DECKY_USER_HOME, ".var", "app", browser_id, "pip-theater-profile")
         os.makedirs(profile, exist_ok=True)
+        self.profile = profile
+        leftover = await _clear_profile(profile)
+        if leftover:
+            decky.logger.info(f"Stopped {leftover} leftover browser process(es) on the profile")
+        self.output.clear()
+        self.started_at = time.monotonic()
         w, h = self._pixel_size()
         args = [
             FLATPAK, "run", browser_id,
@@ -280,6 +336,8 @@ class ExternalBrowser:
             text = line.decode(errors="ignore").rstrip()
             if text:
                 decky.logger.debug(f"[{name}] {text}")
+                if name == "browser":
+                    self.output.append(text)
 
     async def _watch_browser(self):
         proc = self.browser
@@ -287,7 +345,11 @@ class ExternalBrowser:
             return
         code = await proc.wait()
         if proc is self.browser:
-            decky.logger.info(f"External browser exited with code {code}")
+            ran = time.monotonic() - self.started_at
+            self.last_exit = (code, round(ran, 1))
+            decky.logger.info(f"External browser exited with code {code} after {ran:.1f}s")
+            for text in list(self.output)[-15:]:
+                decky.logger.info(f"[browser] {text}")
             await decky.emit("pip_external_status", "exited", str(code))
             await self.stop()
 
@@ -310,6 +372,8 @@ class ExternalBrowser:
                 await asyncio.wait_for(browser.wait(), timeout=5)
             except asyncio.TimeoutError:
                 _signal_group(browser.pid, signal.SIGKILL)
+        if browser is not None and self.profile:
+            await _clear_profile(self.profile)
         for t in self._tasks:
             if t is not asyncio.current_task():
                 t.cancel()
@@ -377,7 +441,12 @@ class Plugin:
         return await self.mirror.system_check()
 
     async def mirror_report(self, extra: str = ""):
-        return await self.mirror.save_report(extra)
+        ext = self.external
+        lines = ["", "== streaming browser ==",
+                 "running: %s" % ext.running,
+                 "last exit (code, seconds it ran): %s" % (ext.last_exit,)]
+        lines += list(ext.output) or ["(no browser messages)"]
+        return await self.mirror.save_report((extra or "") + "\n".join(lines) + "\n")
 
     # ---- external browser (DRM sites) ------------------------------------- #
 
