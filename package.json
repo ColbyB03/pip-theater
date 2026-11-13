@@ -1,6 +1,6 @@
 {
   "name": "pip-theater",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Picture-in-picture over your games: mirror your phone's screen (AirPlay) or play Netflix, YouTube and other streaming sites.",
   "type": "module",
   "scripts": {

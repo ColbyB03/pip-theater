@@ -17,6 +17,7 @@ import asyncio
 import collections
 import json
 import os
+import shutil
 import signal
 import socket
 import sys
@@ -36,6 +37,9 @@ SYSTEM_PYTHON = "/usr/bin/python3"
 FLATPAK = "/usr/bin/flatpak"
 
 # Flatpak browsers that bundle (or auto-download) the Widevine CDM.
+# Browsers that ship Widevine themselves (Brave downloads it on first use instead).
+BUILTIN_WIDEVINE = ("com.google.Chrome", "com.microsoft.Edge")
+
 KNOWN_BROWSERS = [
     ("com.google.Chrome", "Google Chrome"),
     ("com.microsoft.Edge", "Microsoft Edge"),
@@ -238,6 +242,14 @@ class ExternalBrowser:
         os.makedirs(profile, exist_ok=True)
         self.profile = profile
         leftover = await _clear_profile(profile)
+        # Chrome and Edge ship their DRM module (Widevine) and later download a newer copy into
+        # the profile. In a Flatpak the browser's sandbox can only load that copy from the
+        # default profile's folder, not from ours, so after the download protected video stops
+        # playing ("make sure sites can play protected content"). Remove the downloaded copy
+        # and keep the browser on the module it ships with.
+        builtin_drm = browser_id in BUILTIN_WIDEVINE
+        if builtin_drm:
+            shutil.rmtree(os.path.join(profile, "WidevineCdm"), ignore_errors=True)
         if leftover:
             decky.logger.info(f"Stopped {leftover} leftover browser process(es) on the profile")
         self.output.clear()
@@ -267,6 +279,8 @@ class ExternalBrowser:
             # (Not --deny-permission-prompts: that also refuses protected content, i.e. DRM.)
             "--disable-notifications",
         ]
+        if builtin_drm:
+            args.append("--disable-component-update")
         try:
             self.browser = await asyncio.create_subprocess_exec(
                 *args, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.DEVNULL,
