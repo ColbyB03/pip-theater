@@ -176,6 +176,45 @@ async def _clear_profile(profile: str) -> int:
     return len(found)
 
 
+def _quiet_profile(profile: str) -> None:
+    """Turns off the browser's own pop-ups that nobody can answer in the small window.
+
+    "Save password?" and "... wants to show notifications" are drawn by the browser, not by the
+    page, so neither the window nor the control view can click them. Staying signed in does not
+    need saved passwords: the sign-in itself is kept in the profile.
+    Only called while no browser is using the profile.
+    """
+    path = os.path.join(profile, "Default", "Preferences")
+    try:
+        with open(path, encoding="utf-8") as f:
+            prefs = json.load(f)
+        if not isinstance(prefs, dict):
+            return
+    except FileNotFoundError:
+        prefs = {}
+    except (OSError, ValueError):
+        return  # unreadable: leave the browser's file alone
+
+    def section(parent: dict, key: str) -> dict:
+        if not isinstance(parent.get(key), dict):
+            parent[key] = {}
+        return parent[key]
+
+    prefs["credentials_enable_service"] = False
+    prefs["credentials_enable_autosignin"] = False
+    prof = section(prefs, "profile")
+    prof["password_manager_enabled"] = False
+    section(prof, "default_content_setting_values")["notifications"] = 2  # 2 = block
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".pip-theater.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(prefs, f)
+        os.replace(tmp, path)
+    except OSError as exc:
+        decky.logger.warning(f"Could not update browser preferences: {exc}")
+
+
 def _http_json(url: str, timeout: float = 2.0):
     with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (localhost only)
         return json.loads(resp.read().decode())
@@ -247,6 +286,7 @@ class ExternalBrowser:
         # default profile's folder, not from ours, so after the download protected video stops
         # playing ("make sure sites can play protected content"). Remove the downloaded copy
         # and keep the browser on the module it ships with.
+        _quiet_profile(profile)
         builtin_drm = browser_id in BUILTIN_WIDEVINE
         if builtin_drm:
             shutil.rmtree(os.path.join(profile, "WidevineCdm"), ignore_errors=True)
