@@ -1,5 +1,5 @@
 import { DialogButton, Focusable, Navigation, TextField } from "@decky/ui";
-import { CSSProperties, MouseEvent, useEffect, useRef, useState, WheelEvent } from "react";
+import { CSSProperties, PointerEvent, useEffect, useRef, useState, WheelEvent } from "react";
 import { FaArrowLeft, FaCheck, FaPlay, FaRedo } from "react-icons/fa";
 import { CdpClient, connectToPage } from "./cdp";
 import * as player from "./player";
@@ -140,7 +140,7 @@ function ExternalBrowse() {
     };
   }, []);
 
-  const toPage = (e: MouseEvent | WheelEvent) => {
+  const toPage = (e: { clientX: number; clientY: number }) => {
     const r = img.current!.getBoundingClientRect();
     return {
       x: ((e.clientX - r.left) / r.width) * meta.current.w,
@@ -148,11 +148,47 @@ function ExternalBrowse() {
     };
   };
 
-  const mouse = (type: string, e: MouseEvent) => {
+  const send = (type: string, x: number, y: number, extra: Record<string, unknown> = {}) =>
+    cdp.current?.send("Input.dispatchMouseEvent", { type, x, y, ...extra }).catch(() => undefined);
+
+  // Touchscreen (and mouse) on the picture: a short press is a tap on the page, a drag scrolls it
+  // like on a phone. The press is only sent to the page on release, once we know it was no drag.
+  const drag = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+
+  const down = (e: PointerEvent<HTMLImageElement>) => {
+    drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      /* not capturable: dragging still works while the finger stays on the picture */
+    }
+  };
+
+  const move = (e: PointerEvent<HTMLImageElement>) => {
+    const d = drag.current;
     const { x, y } = toPage(e);
-    cdp.current
-      ?.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: 1 })
-      .catch(() => undefined);
+    if (!d || d.id !== e.pointerId) {
+      send("mouseMoved", x, y);
+      return;
+    }
+    const dx = e.clientX - d.x;
+    const dy = e.clientY - d.y;
+    if (!d.moved && Math.hypot(dx, dy) < 12) return;
+    d.moved = true;
+    d.x = e.clientX;
+    d.y = e.clientY;
+    const r = img.current!.getBoundingClientRect();
+    send("mouseWheel", x, y, { deltaX: (-dx / r.width) * meta.current.w, deltaY: (-dy / r.height) * meta.current.h });
+  };
+
+  const up = (e: PointerEvent<HTMLImageElement>) => {
+    const d = drag.current;
+    drag.current = null;
+    if (!d || d.id !== e.pointerId || d.moved) return;
+    const { x, y } = toPage(e);
+    send("mouseMoved", x, y);
+    send("mousePressed", x, y, { button: "left", buttons: 1, clickCount: 1 });
+    send("mouseReleased", x, y, { button: "left", buttons: 0, clickCount: 1 });
   };
 
   const wheel = (e: WheelEvent) => {
@@ -192,10 +228,11 @@ function ExternalBrowse() {
             ref={img}
             src={frame}
             draggable={false}
-            style={{ maxWidth: "100%", maxHeight: "100%", userSelect: "none" }}
-            onMouseDown={(e) => mouse("mousePressed", e)}
-            onMouseUp={(e) => mouse("mouseReleased", e)}
-            onMouseMove={(e) => mouse("mouseMoved", e)}
+            style={{ maxWidth: "100%", maxHeight: "100%", userSelect: "none", touchAction: "none" }}
+            onPointerDown={down}
+            onPointerMove={move}
+            onPointerUp={up}
+            onPointerCancel={() => (drag.current = null)}
             onWheel={wheel}
           />
         ) : (
@@ -215,10 +252,10 @@ function ExternalBrowse() {
           </DialogButton>
         ))}
         <DialogButton style={btn} onClick={() => scroll(-400)}>
-          ⇞
+          Scroll ▲
         </DialogButton>
         <DialogButton style={btn} onClick={() => scroll(400)}>
-          ⇟
+          Scroll ▼
         </DialogButton>
       </Focusable>
     </div>
