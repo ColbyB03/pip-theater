@@ -12,4 +12,10 @@ gst-inspect-1.0 h264parse >/dev/null 2>&1 || P="${P:+$P:}$D/gst/videoparsers"
 export GST_PLUGIN_PATH="$P${GST_PLUGIN_PATH:+:$GST_PLUGIN_PATH}"
 export GST_REGISTRY="$CACHE/gst-registry-$(cksum < "$D/VERSION" | cut -d' ' -f1).bin"
 echo "pip-theater: bundled GStreamer plugins in use: ${P:-none}"
+# Line-buffered output: the plugin reads the receiver's messages as they happen (for example
+# "connection request from ...", which triggers the PIN notification). Through a pipe they
+# would otherwise sit in a buffer until it fills.
+if command -v stdbuf >/dev/null 2>&1; then
+  exec stdbuf -oL -eL "$D/uxplay" "$@"
+fi
 exec "$D/uxplay" "$@"

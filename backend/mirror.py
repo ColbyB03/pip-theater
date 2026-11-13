@@ -546,7 +546,8 @@ class Mirror:
         if not want:
             raise RuntimeError("This build has no AirPlay receiver (bin/%s). "
                                "Install the release ZIP from the plugin's GitHub page." % BUNDLE)
-        if _load_text(os.path.join(dst, "VERSION")) != want or not os.path.isfile(os.path.join(dst, "run.sh")):
+        launcher = _load_text(os.path.join(src, "run.sh"))
+        if _load_text(os.path.join(dst, "VERSION")) != want or _load_text(os.path.join(dst, "run.sh")) != launcher:
             shutil.rmtree(dst, ignore_errors=True)
             shutil.copytree(src, dst)
         for root, _dirs, files in os.walk(dst):
