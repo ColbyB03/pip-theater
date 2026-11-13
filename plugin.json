@@ -1,0 +1,11 @@
+{
+  "name": "PiP Theater",
+  "author": "YOUR_NAME_HERE",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["video", "streaming", "picture-in-picture", "overlay"],
+    "description": "Watch Netflix, Disney+, YouTube, Twitch and more in a resizable, movable picture-in-picture window on top of your games.",
+    "image": "https://raw.githubusercontent.com/YOUR_GITHUB_USER/pip-theater/main/assets/preview.png"
+  }
+}
